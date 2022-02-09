@@ -1,0 +1,329 @@
+---
+title: "Heart Disease Prediction"
+author: "Marco d'Onofrio"
+date: "13/1/2022"
+output: html_document
+---
+```{r}
+library(skimr)
+library(dplyr)
+library(tibble)
+library(superml)
+library(caret)
+library(corrplot)
+library(Metrics)
+library(pROC)
+library(rlang)
+library(ROCR)
+library(MASS)
+library(psych)
+library(ggplot2)
+library(klaR)
+
+set.seed(1)
+```
+
+```{r}
+df = read.csv("framingham.csv", header = T)
+
+attach(df)
+head(df)
+```
+```{r}
+str(df)
+```
+
+```{r}
+skim(df)
+```
+
+```{r}
+skim(df) %>%
+  as_tibble()
+```
+
+
+```{r}
+sum(is.na(df))
+mean(is.na(df))
+```
+
+```{r}
+df = na.omit(df)
+```
+
+```{r}
+skim(df)
+```
+
+```{r}
+df_no_dummies = df[-c(1, 4, 6, 7, 8, 9)]
+mat_cor <- cor(df_no_dummies)
+```
+
+```{r}
+corrplot(mat_cor, method = "color", type = "upper",number.cex = .5, order="hclust", addCoef.col = "black",tl.col = "#CC9900", diag=F)
+```
+```{r}
+age_male = sqrt(summary(lm( age ~ male  ,data = df))$r.squared)
+educ_male = sqrt(summary(lm( education ~ male  ,data = df))$r.squared)
+cigs_male = sqrt(summary(lm( cigsPerDay ~ male  ,data = df))$r.squared)
+chol_male = sqrt(summary(lm( totChol ~ male  ,data = df))$r.squared)
+sys_male = sqrt(summary(lm( sysBP ~ male  ,data = df))$r.squared)
+dia_male = sqrt(summary(lm( diaBP ~ male  ,data = df))$r.squared)
+bmi_male = sqrt(summary(lm( BMI ~ male  ,data = df))$r.squared)
+heart_male = sqrt(summary(lm( heartRate ~ male  ,data = df))$r.squared)
+glu_male = sqrt(summary(lm( glucose ~ male  ,data = df))$r.squared)
+ten_male = sqrt(summary(lm( TenYearCHD ~ male  ,data = df))$r.squared)
+
+mat_cor_male <- data.frame(age_male, educ_male, cigs_male, chol_male, sys_male, dia_male, bmi_male,   
+                                 heart_male, glu_male, ten_male)
+
+knitr::kable(mat_cor_male, "simple")
+```
+
+
+```{r}
+df$male <- factor(df$male)
+df$currentSmoker <- factor(df$currentSmoker)
+df$BPMeds <- factor(df$BPMeds)
+df$prevalentStroke <- factor(df$prevalentStroke)
+df$prevalentHyp <- factor(df$prevalentHyp)
+df$diabetes <- factor(df$diabetes)
+df$TenYearCHD <- factor(df$TenYearCHD)
+```
+
+```{r}
+str(df)
+```
+
+```{r}
+df %>%
+  mutate_if(is.numeric, scale)
+```
+
+
+```{r}
+split = createDataPartition(y = df$TenYearCHD, p= 0.7, list = F)
+x_train = df[split,]
+x_test = df[-split,]
+```
+
+```{r}
+dim(x_train)
+dim(x_test)
+
+```
+
+```{r}
+log_reg = LMTrainer$new(family = "binomial")
+log_reg$fit(X = x_train, y = "TenYearCHD")
+summary(log_reg$model)
+```
+
+
+```{r}
+y_scores = log_reg$predict(x_test)
+```
+
+```{r}
+threshold=0.15
+y_pred = factor(ifelse(y_scores >threshold,1,0))
+confusionMatrix(data = y_pred, reference =  x_test$TenYearCHD, positive = "1")
+```
+
+```{r}
+auc = roc(x_test$TenYearCHD, y_scores)
+auc
+```
+
+```{r}
+plot(auc, ylim=c(0,1), print.thres=TRUE, main=paste('AUC:',round(auc$auc[[1]],2)))
+abline(h=1,col='blue',lwd=2)
+abline(h=0,col='red',lwd=2)
+```
+
+```{r}
+x_train = x_train[-c(3, 4, 6, 7, 8, 9, 12, 13, 14)]
+x_test = x_test[-c(3, 4, 6, 7, 8, 9, 12, 13, 14)]
+```
+
+```{r}
+log_reg = LMTrainer$new(family = "binomial")
+log_reg$fit(X = x_train, y = "TenYearCHD")
+summary(log_reg$model)
+```
+
+```{r}
+y_scores = log_reg$predict(x_test)
+```
+
+```{r}
+threshold=0.18		
+y_pred = factor(ifelse(y_scores >threshold,1,0))
+confusionMatrix(data = y_pred, reference =  x_test$TenYearCHD, positive = "1")
+```
+
+```{r}
+auc = roc(x_test$TenYearCHD, y_scores)
+auc
+```
+
+```{r}
+plot(auc, ylim=c(0,1), print.thres=TRUE, main=paste('AUC:',round(auc$auc[[1]],2)))
+abline(h=1,col='blue',lwd=2)
+abline(h=0,col='red',lwd=2)
+```
+
+```{r}
+cm = table(Actual = x_test$TenYearCHD, Predicted = y_pred)
+diag = diag(cm)
+n = sum(cm)
+nc = nrow(cm)
+colsums = apply(cm, 2, sum)
+rowsums = apply(cm, 1, sum)
+```
+
+```{r}
+precision = mean(diag/colsums)
+precision
+```
+
+```{r}
+recall = mean(diag/rowsums)
+recall
+```
+
+
+
+
+
+```{r}
+forest_clf = RFTrainer$new(n_estimators = 500, classification = 1, max_features = 3)
+forest_clf$fit(X = x_train, y = "TenYearCHD")
+```
+
+```{r}
+forest_clf$get_importance()
+```
+
+```{r}
+y_pred = forest_clf$predict(x_test)
+```
+
+
+```{r}
+confusionMatrix(data = y_pred, reference =  x_test$TenYearCHD, positive = "1")
+```
+
+```{r}
+cm = table(Actual = x_test$TenYearCHD, Predicted = y_pred)
+diag = diag(cm)
+n = sum(cm)
+nc = nrow(cm)
+colsums = apply(cm, 2, sum)
+rowsums = apply(cm, 1, sum)
+```
+
+
+```{r}
+precision = mean(diag/colsums)
+precision
+```
+
+```{r}
+recall = mean(diag/rowsums)
+recall
+```
+
+```{r}
+grid = list(n_estimators = c( 80, 800, 900, 1000),
+                       max_depth = c(0.2, 0.3, 0.01, 0.07))
+           
+
+rscv_forest = RandomSearchCV$new(trainer = forest_clf,
+                                 parameters = grid,
+                                 n_folds = 3, 
+                                 scoring=c("accuracy", "auc"),
+                                 n_iter = 5)
+env_binding_unlock(rscv_forest) #Unlock the environment 
+```
+
+```{r}
+rscv_forest$fit(x_train, "TenYearCHD")
+```
+
+```{r}
+best_model = rscv_forest$best_iteration()
+best_model
+```
+
+```{r}
+forest_clf = RFTrainer$new(n_estimators = 800, classification = 1, max_features = 3, max_depth = 0.01)
+forest_clf$fit(X = x_train, y = "TenYearCHD")
+```
+
+```{r}
+y_pred = forest_clf$predict(x_test)
+```
+
+```{r}
+confusionMatrix(data = y_pred, reference =  x_test$TenYearCHD, positive = "1")
+```
+
+
+
+```{r}
+pairs.panels(x_train[1:6],gap=0, bg=c("blue","green")[x_train$TenYearCHD],pch=21)
+```
+
+```{r}
+lda_clf = lda(TenYearCHD ~ ., data = x_train)
+lda_clf
+```
+
+```{r}
+plot(lda_clf)
+```
+
+```{r}
+y_pred = predict(lda_clf, x_test)
+names(y_pred)
+```
+
+```{r}
+mean(y_pred$class == x_test$TenYearCHD)
+```
+
+```{r, fig.height=8, fig.width=6}
+
+partimat(TenYearCHD ~ .,data=x_train, method="lda")
+```
+
+```{r}
+lda_cv = lda(TenYearCHD ~ ., data = x_test, CV = T)
+confusionMatrix(data = lda_cv$class, reference =  x_test$TenYearCHD, positive = "1" )
+```
+
+```{r}
+pred_roc = prediction(lda_cv$posterior[,"1"], x_test$TenYearCHD)
+roc_ROCR = performance(pred_roc, measure = "tpr", x.measure = "fpr")
+plot(roc_ROCR, main = "ROC Curve", colorize = T, xlab = "False Positive Rate", ylab = "True Positive Rate")
+abline(a = 0, b = 1)
+```
+
+```{r}
+auc_ROCR <- performance(pred_roc, measure = "auc")
+auc_ROCR <- auc_ROCR@y.values[[1]]
+auc_ROCR
+```
+
+```{r}
+cutoff=roc_ROCR@alpha.values[[1]]
+FP=roc_ROCR@x.values[[1]]
+TP=roc_ROCR@y.values[[1]]
+roc_df=data.frame(FP=FP,TP=TP,thr=cutoff)
+tail(roc_df)
+head(roc_df)
+```
+

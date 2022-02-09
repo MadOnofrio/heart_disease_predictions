@@ -1,0 +1,568 @@
+---
+title: "Heart Disease Prediction"
+author: "Marco d'Onofrio"
+date: "19/1/2022"
+output:
+  rmdformats::readthedown
+---
+<style type="text/css">
+
+body{ /* Normal  */
+      font-size: 15px;
+      color: #000000; 
+  }
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+rm(list=ls())
+```
+# Introduzione
+
+La presente analisi ha come obiettivo quello di individuare i fattori che concorrono ad aumentare il rischio di contrarre nel futuro malattie cardiovascolari, nonché quello di individuare un classificatore che meglio riesca a prevedere tale rischio. Una prognosi tempestiva, infatti, può essere utile nel prendere decisioni riguardo al cambio di stile divita dei pazienti ad alto rischio e ridurre il rischio di complicazioni.  
+
+# Library Imports
+
+```{r, message=F, warning=F}
+library(skimr)
+library(dplyr)
+library(caret)
+library(corrplot)
+library(ROCR)
+library(MASS)
+library(psych)
+library(ggplot2)
+library(klaR)
+library(tidyr)
+library(cowplot)
+library(mlbench)
+library(AppliedPredictiveModeling)
+library(car)
+library(rattle)
+library(e1071)
+library(kernlab)
+library(ROSE)
+```
+
+
+
+# Data Set Import
+
+Il Data Set utilizzato riguarda uno studio condotto sulla popolazione della città di Framingham, Massachusetts. I classificatori proposti avranno l'obiettivo di individuare tutti quei pazienti considerati a rischio, ovvero quelli che potrebbero contrarre una malattia cardiovascolare entro 10 anni (<code>TenYearCHD</code>). Per fare ciò si utilizzeranno circa 4000 osservazioni e 15 variabili indipendenti.
+
+```{r}
+df = read.csv("framingham.csv", header = T)
+
+attach(df)
+head(df)
+```
+
+Nella sezione successiva andremo ad analizzare nel dettaglio il Data Set in questione e al contempo svolgeremo le operazioni di Pre-processing necessarie alla nostra analisi.
+
+# EDA & Pre-Processing
+
+Tramite la funzione <code>str()</code> possiamo osservare che il Data Set contiene 4238 osservazioni e 16 variabili.
+
+```{r}
+str(df)
+```
+
+possiamo suddividere le variabili in questione in variabili *demografiche*:
+
+- <code>sex</code>: se il paziente in questione è uomo o donna (dummy);
+- <code>age</code>: l'età del paziente (continua);
+- <code>education</code>: gli anni di educazione del paziente;
+
+*comportamentali*:
+
+- <code>currentSmoker</code>: se il paziente è fumatore oppure no (dummy);
+- <code>cigsPerDay</code>: numero di sigarette che in media fuma il paziente (mantenuta continua considerato il fatto che un individuo può decidere anche di fumare solo la metà di una sigaretta);
+
+*mediche*:
+
+- <code>BPMeds</code>: se il paziente prende oppure no medicinali per la pressione (categorica);
+- <code>prevalentStroke</code>: se il paziente ha avuto oppure no un infarto (categorica);
+- <code>prevalentHyp</code>: se il paziente soffre oppure no di ipertensione (categorica);
+- <code>diabetes</code>: se il paiente ha il diabete oppure no (categorica);
+- <code>totChol</code>: livello di colesterolo totale rilevato (continua);
+- <code>sysBP</code>: livello della pressione sistolica (continua);
+- <code>diaBP</code>:livello della pressione diastolica (continua);
+- <code>BMI</code>: indice di massa corporeo (continua);
+- <code>heartRate</code>: livello del battito cardiaco (continua);
+- <code>glucose</code>: livello di glucosio nel sangue del paziente (continua);
+
+*variabile target*:
+
+- <code>TenYearCHD</code>:rischio di contrre malattie cardiovascolari tra 10 anni ("1" per "Sì", "0" per "No"). 
+
+Tramite la funzione <code>skim()</code> possiamo ottenere un'analisi più dettagliata del nostro Data Set:
+
+```{r}
+skim(df)
+```
+
+Si notano due cose: che tutte le variabili sono di tipo numerico (anche le variabili categoriche) e che alcune variabili presentano valori mancanti. 
+
+```{r}
+sum(is.na(df))
+```
+Nello specifico sono presenti 645 valori NA. La maggior parte dei valori mancanti sono registrati in corrispondenza della variabile <code>glucose</code> ed <code>education</code>.
+
+Nelle sezioni successive ci concentreremo, quindi, sul trattamento dei valori mancanti nel dataset nonché della conversione delle variabili di tipo categorico in variabili di tipo factor.
+
+## Imputing missing values
+
+In questa analisi si è preferito non eliminare dal Data Set le osservazioni che presentano valori NA; in tal senso è stata adottata una logica che permettesse di imputare dei valori per le variabili che presentano valori mancanti, guardando alle singole distribuzioni di tali variabili:
+
+```{r}
+par(mfrow=c(3,3), mar=c(4,4,2,0.5))
+for (j in 1:ncol(df[c(3,5,6,10,13,14,15)])) {
+  hist(df[c(3,5,6,10,13,14,15)][,j], xlab=colnames(df[c(3,5,6,10,13,14,15)])[j],
+       main=paste("Histogram of", colnames(df[c(3,5,6,10,13,14,15)])[j]),
+       col="lightblue", breaks=20)
+}
+```
+
+```{r}
+summary(df[c(3,5,6,10,13,14,15)])
+```
+Nello specifico, si è scelto di imputare con i valori NA con i valori più frequenti di cianscuna distribuzione:
+
+```{r}
+df =df %>%
+      replace_na(list(education = 1, cigsPerDay = 0, BPMeds = 0, totChol = 234,
+                  BMI = 25.40, heartRate = 75, glucose = 78))
+```
+
+
+## Factor Trasformation
+
+Il secondo aspetto di cui ci si è occupato è la conversione della variabili di tipo categorico in variabili di tipo fattore attraverso la funzione <code>factor()</code>:
+
+```{r}
+df$male <- factor(df$male)
+df$education <- factor(df$education)
+df$currentSmoker <- factor(df$currentSmoker)
+df$BPMeds <- factor(df$BPMeds)
+df$prevalentStroke <- factor(df$prevalentStroke)
+df$prevalentHyp <- factor(df$prevalentHyp)
+df$diabetes <- factor(df$diabetes)
+df$TenYearCHD <- factor(df$TenYearCHD)
+df$education <- factor(df$education)
+```
+
+Possiamo ora osservare gli effetti delle trasformazioni appena effettuate:
+
+```{r}
+str(df)
+```
+
+```{r}
+skim(df)
+```
+Le variabili di tipo categorico sono state convertite tutte correttamente e l'imputazione dei valori mancanti è andata a buon fine.
+
+## Response Variable
+
+Si propone di seguito uno studio dettagliato riguardo la variabile dipendente <code>tenYearCHD</code>: tramite l'ausilio di alcuni boxplot si è cercato di mettere in risalto le possibili relazini che intercorrono tra la variabile ogetto di studio ed alcune delle variabili indipendenti presenti nel Data Set: 
+
+```{r}
+x <- ggplot(data = df, mapping = aes(x = TenYearCHD, y = age, fill = TenYearCHD)) +
+  geom_boxplot()
+y <- ggplot(data = df, mapping = aes(x = as.factor(TenYearCHD), y = totChol, color = TenYearCHD)) +
+  geom_boxplot()
+p <- cowplot::plot_grid(x, y) 
+title <- cowplot::ggdraw() + cowplot::draw_label("1. Relationship between TenYearCHD and Age / TotCHOL", fontface='bold')
+cowplot::plot_grid(title, p, ncol=1, rel_heights=c(0.1, 1))
+```
+
+```{r}
+x <- ggplot(data = df, mapping = aes(x = TenYearCHD, y = sysBP, fill = TenYearCHD)) +
+  geom_boxplot()
+y <- ggplot(data = df, mapping = aes(x = TenYearCHD, y = diaBP, color = TenYearCHD)) +
+  geom_boxplot()
+p <- plot_grid(x, y) 
+title <- ggdraw() + draw_label("2. Relationship between TenYearCHD and sysBP / diaBP", fontface='bold')
+plot_grid(title, p, ncol=1, rel_heights=c(0.1, 1))
+```
+
+```{r}
+x <- ggplot(data = df, mapping = aes(x = TenYearCHD, y = BMI, fill = TenYearCHD)) +
+  geom_boxplot()
+y <- ggplot(data = df, mapping = aes(x = TenYearCHD, y = heartRate, color = TenYearCHD)) +
+  geom_boxplot()
+p <- plot_grid(x, y) 
+title <- ggdraw() + draw_label("3. Relationship between TenYearCHD and BMI / HeartRate", fontface='bold')
+plot_grid(title, p, ncol=1, rel_heights=c(0.1, 1))
+```
+
+```{r}
+x <- ggplot(data = df, mapping = aes(x = TenYearCHD, y = glucose, fill = TenYearCHD)) +
+  geom_boxplot()
+y <- ggplot(data = df, mapping = aes(x = TenYearCHD, y = cigsPerDay, fill = TenYearCHD)) +
+  geom_boxplot()
+p <- plot_grid(x,y) 
+title <- ggdraw() + draw_label("4. Relationship between TenYearCHD and Glucose / Cigs per Day", fontface='bold')
+plot_grid(title, p, ncol=1, rel_heights=c(0.1, 1))
+```
+
+```{r}
+x <- ggplot(data = df) +
+  geom_count(mapping = aes(x = male, y = TenYearCHD))
+y <- ggplot(data = df) +
+  geom_count(mapping = aes(x = diabetes, y = TenYearCHD))
+p <- plot_grid(x, y) 
+title <- ggdraw() + draw_label("5. Relationship between TenYearCHD and Sex / Diabetes", fontface='bold')
+plot_grid(title, p, ncol=1, rel_heights=c(0.1, 1))
+```
+
+Da tali plot possiamo apprendere che:
+
+- i pazienti con CHD (Coronary Heart Disease) hanno età media e livelli di colesterlono più elevati;
+- i pazienti con CHD hanno livelli più alti di pressione sistolica e diastolica;
+- i pazienti con CHD hanno un indice di massa corporeo più elevato, ma un battito cardiaco medio uguale ai soggetti che non hanno la CHD;
+- i pazienti con e senza CHD hanno livelli di glucosio simili;
+- sono più i pazienti maschi che le pazienti donne ad avere la CHD, e sono più i non diabetici ad avere la CHD
+
+## Correlations
+
+Possiamo osservare la struttura di correlazione tra le variabili che compongono il nostro Data Set plottando la matrice di correlazione. 
+Essendoci alcune variabili categoriche possiamo calcolare la correlazione tra loro costruendo la matrice di correlazione a partire dalla funzione <code>model.matrix()</code>; tale funzione fa il One Hot Encoding della variabili categoriche e calcola la correlazione esattamente come farebbe un classico modello di regressione trattando i livelli della variabile categorica come variabili distinte.
+
+```{r dpi=200}
+model.matrix(~0+., data = df) %>%
+  cor(use="pairwise.complete.obs") %>% 
+  corrplot(method = "color", type = "upper",number.cex = .5, order="hclust", addCoef.col = "black",tl.col = "#CC9900",            diag=F)
+```
+
+La matrice non permette di osservare correlazioni particolarmente elevate tranne quella che intercorre tra la pressione diastolica e quella sistolica.
+
+## Train-test Split
+ 
+Si è diviso successivamente il Data Set in Training Set e Test Set optando per una proporzione rispettivamente dell'80 e del 20%.
+
+```{r}
+set.seed(123)
+split = createDataPartition(y = df$TenYearCHD, p= 0.8, list = F)
+x_train = df[split,]
+x_test = df[-split,]
+```
+
+```{r}
+dim(x_train)
+dim(x_test)
+```
+
+## Oversampling for imbalanced classes
+
+Si è notato, successivamente un certo sbilanciamento tra le due classi appartenenti alla variabile ogetto di studio. Nello specifico la classe negativa e di gran lunga maggiore rispetto alla classe positiva. Questo farà si che i nostri modelli risultino "high specificity" nel senso che la classe negativa verrà prevista molto più accuratamente rispetto alla classe positiva (che è la classe che ci interessa maggiormente prevedere):  
+
+```{r}
+table(x_train$TenYearCHD)
+```
+
+Per ovviare a tale problema possiamo aumentare la sensitività svolgendo l'Oversampling della classe in minoranza tramite la funzione <code>ovun.sample()</code>: tale funzione permette di ricampionare casualmente alcune delle osservazioni appartenenti alla classe in minoranza allo scopo di bilanciare il più possibile le due classi. Attraverso questa tecnica, al costo di una diminuizione rispetto al livello di accuratezza del modello, ci permette di prevedere in maniera più accurata la classe positiva
+
+```{r}
+x_train = ovun.sample(TenYearCHD ~., data= x_train, method = "over", seed = 123)$data
+```
+
+```{r}
+table(x_train$TenYearCHD)
+```
+Come possiamo osservare la classe positiva (quella in minoranza) è passata da 516 osservazioni a 2847 arrivando quasi a bilanciare perfettamente la classe negativa (2876 osservazioni).
+Il Data Set è pronto ora per l'analisi di classificazione.
+
+# Classifier Comparison
+
+In questa sezione si andranno a "fittare" una serie di modelli sul nostro Training Set allo scopo di monitorare i loro gli indici di performance sia sul Training Set che sul Test Set; l'obiettivo è quello di ottenere uno o più modelli candidati che performano bene con il nostro problema di classificazione.
+Prima di fare ciò, definiamo la variabile <code>control</code>: essa permette di definire il metodo con il quale controllare la computazione della funzione <code>train()</code> che verrà utilizzata in seguito; nello specifico si è optato per una K-Fold-cross-validation ripetuta tre volte su un numero di fold pari quattro. 
+
+```{r}
+control <- trainControl(method="repeatedcv", number=10, repeats=3)
+```
+
+## Logistic Regression
+
+```{r}
+set.seed(123)
+glm_clf <- train(TenYearCHD ~., data = x_train,
+                         method = "glm",
+                         tuneLength = 10,
+                         trControl = control,
+                 )
+glm_clf
+```
+
+
+## LDA - Linear Discriminant Analysis
+
+```{r}
+set.seed(123)
+lda_clf = train(TenYearCHD ~., data = x_train, method="lda", trControl=control)
+lda_clf
+```
+
+
+
+
+
+## SVM - Support Vector Machine
+
+```{r}
+set.seed(7)
+svm_clf = train(TenYearCHD ~., data = x_train, method = "svmLinear", trControl = control)
+
+svm_clf
+```
+
+## Random Forest
+
+```{r}
+set.seed(123)
+forest_clf = train(TenYearCHD ~., data = x_train, method = "rf", 
+                   trControl = control)
+
+forest_clf
+```
+
+
+## XGB - eXtreme Gradient Boosting
+
+```{r}
+set.seed(123)
+xgb_grid_1  <-  expand.grid(
+                  nrounds = 50,
+                  eta = c(0.03),
+                  max_depth = 1,
+                  gamma = 0,
+                  colsample_bytree = 0.6,
+                  min_child_weight = 1,
+                  subsample = 0.5
+                )
+
+xgb_clf = train(TenYearCHD ~., data = x_train,
+                method = "xgbTree", 
+                tuneGrid=xgb_grid_1,
+                trControl = control
+                )
+
+xgb_clf
+```
+
+
+## KNN - K Nearest Neighbours
+
+```{r}
+set.seed(123)
+knn_clf = train(TenYearCHD ~., data = x_train,
+                method = "knn",
+                tuneGrid = expand.grid(.k = c(3:10)),
+                trControl = control,
+                )
+
+knn_clf
+```
+
+## Model Evaluation
+
+Possiamo ora mostrare i risultati ottenuti sul Training Set nella fase di "fitting" dei modelli allo scopo di fornire un confronto tra essi: 
+
+```{r}
+results = resamples(list(LOGREG=glm_clf, LDA=lda_clf, SVM=svm_clf, KNN=knn_clf, RF=forest_clf, XGB = xgb_clf))
+```
+
+```{r}
+summary(results)
+```
+
+Si nota come a livello di performance media l'algoritmo che lavora meglio e il Random Forest con un accuracy pari a circa 0.98. Possiamo anche plottare tali risultati allo scopo di visualizzarli meglio:
+
+```{r}
+scales = list(x=list(relation="free"), y=list(relation="free"))
+bwplot(results, scales=scales)
+```
+
+Anche in questo caso possiamo osservare come il <code>RandomForest</code> sia l'algoritmo che ha performato meglio sul Training Set in quanto mostra il box-plot più compatto e spostato verso destra.
+
+## Performance on Test Set
+
+Si passa ora a mostrare i risultati di performance ottenuti sul Test Set. Nello pecifico raccogliamo le previsioni contenenti la classe predetta e degli scores calcolati come la probabilità di appartenenza ad una delle due classi. Le previsioni saranno utili per la computazione delle matrici di confusione, mentre gli scores saranno utili per il calcolo delle curve ROC e delle AUC (Area Under the Curve). 
+
+```{r}
+glm_predictions = predict(glm_clf, x_test)
+lda_predictions = predict(lda_clf, x_test)
+svm_predictions = predict(svm_clf, x_test)
+knn_predictions = predict(knn_clf, x_test)
+forest_predictions = predict(forest_clf, x_test)
+xgb_predictions = predict(xgb_clf, x_test)
+
+glm_scores = predict(glm_clf, x_test, type = "prob")
+lda_scores = predict(lda_clf, x_test, type = "prob")
+knn_scores = predict(knn_clf, x_test, type = "prob")
+forest_scores = predict(forest_clf, x_test, type = "prob")
+xgb_scores = predict(xgb_clf, x_test, type = "prob")
+```
+
+```{r}
+cm_glm = confusionMatrix(data = glm_predictions, reference = x_test$TenYearCHD, positive = "1")
+cm_glm
+```
+
+```{r}
+pred_roc_glm = prediction(glm_scores[,2], x_test$TenYearCHD)
+glm_ROCR = performance(pred_roc_glm, measure = "tpr", x.measure = "fpr")
+par(mfrow=c(1,1))
+plot(glm_ROCR, main = "ROC curve for Logistic Reg.", colorize = T, xlab="False Positive rate", ylab="True Positive rate" )
+abline(a = 0, b = 1)
+```
+```{r}
+auc_glm = performance(pred_roc_glm, measure = "auc")
+auc_glm = auc_glm@y.values[[1]]
+auc_glm
+```
+
+
+```{r}
+cm_lda = confusionMatrix(data = lda_predictions, reference = x_test$TenYearCHD, positive = "1")
+cm_lda
+```
+
+```{r}
+pred_roc_lda = prediction(lda_scores[,2], x_test$TenYearCHD)
+lda_ROCR = performance(pred_roc_lda, measure = "tpr", x.measure = "fpr")
+par(mfrow=c(1,1))
+plot(lda_ROCR, main = "ROC curve for LDA", colorize = T, xlab="False Positive rate", ylab="True Positive rate" )
+abline(a = 0, b = 1)
+```
+
+```{r}
+auc_lda = performance(pred_roc_lda, measure = "auc")
+auc_lda = auc_lda@y.values[[1]]
+auc_lda
+```
+
+```{r}
+cm_svm = confusionMatrix(data = svm_predictions, reference = x_test$TenYearCHD, positive = "1")
+cm_svm
+```
+
+```{r}
+cm_knn = confusionMatrix(data = knn_predictions, reference = x_test$TenYearCHD, positive = "1")
+cm_knn
+```
+
+```{r}
+pred_roc_knn = prediction(knn_scores[,2], x_test$TenYearCHD)
+knn_ROCR = performance(pred_roc_knn, measure = "tpr", x.measure = "fpr")
+par(mfrow=c(1,1))
+plot(knn_ROCR, main = "ROC curve for KNN", colorize = T, xlab="False Positive rate", ylab="True Positive rate" )
+abline(a = 0, b = 1)
+```
+
+```{r}
+auc_knn = performance(pred_roc_knn, measure = "auc")
+auc_knn = auc_knn@y.values[[1]]
+auc_knn
+```
+
+```{r}
+cm_forest = confusionMatrix(data = forest_predictions, reference = x_test$TenYearCHD, positive = "1")
+cm_forest
+```
+
+```{r}
+pred_roc_forest = prediction(forest_scores[,2], x_test$TenYearCHD)
+forest_ROCR = performance(pred_roc_forest, measure = "tpr", x.measure = "fpr")
+par(mfrow=c(1,1))
+plot(forest_ROCR, main = "ROC curve for Random forest", colorize = T, xlab="False Positive rate", ylab="True Positive rate" )
+abline(a = 0, b = 1)
+```
+
+```{r}
+auc_forest = performance(pred_roc_forest, measure = "auc")
+auc_forest = auc_forest@y.values[[1]]
+auc_forest
+```
+
+```{r}
+cm_xgb = confusionMatrix(data = xgb_predictions, reference = x_test$TenYearCHD, positive = "1")
+cm_xgb
+```
+
+```{r}
+pred_roc_xgb = prediction(xgb_scores[,2], x_test$TenYearCHD)
+xgb_ROCR = performance(pred_roc_xgb, measure = "tpr", x.measure = "fpr")
+par(mfrow=c(1,1))
+plot(xgb_ROCR, main = "ROC curve for XGB", colorize = T, xlab="False Positive rate", ylab="True Positive rate" )
+abline(a = 0, b = 1)
+```
+
+```{r}
+auc_xgb = performance(pred_roc_xgb, measure = "auc")
+auc_xgb = auc_xgb@y.values[[1]]
+auc_xgb
+```
+
+```{r}
+ModelType = c( "LOGREG", "LDA", "SVM", "KNN", "Random forest", "XGB")  
+TrainAcc = c(max(glm_clf$results$Accuracy), max(lda_clf$results$Accuracy), 
+             max(svm_clf$results$Accuracy), max(knn_clf$results$Accuracy), 
+             max(forest_clf$results$Accuracy),  
+             max(xgb_clf$results$Accuracy))
+
+Train_misscl_Er = 1 - TrainAcc
+
+ValidAcc = c(cm_glm$overall[1], cm_lda$overall[1], cm_svm$overall[1], 
+             cm_knn$overall[1], cm_forest$overall[1],   
+             cm_xgb$overall[1])
+
+Valid_misscl_Er = 1 - ValidAcc
+
+auc_svm = NA
+auc_scores = c(auc_glm, auc_lda, auc_svm, auc_knn, auc_forest, auc_xgb)
+
+metrics = cbind(ModelType, TrainAcc, Train_misscl_Er, ValidAcc, 
+                      Valid_misscl_Er, auc_scores)
+
+metrics = data.frame(metrics)
+
+knitr::kable(metrics, digits = 3) 
+```
+
+```{r, warning=FALSE}
+model_compare = cbind(Model=ModelType, Accuracy=TrainAcc)
+model_compare = data.frame(model_compare)  
+
+ggplot(aes(x=Model, y=Accuracy), data=model_compare) +
+  geom_bar(stat='identity', fill = 'blue') +
+  ggtitle('Comparative Accuracy of Models on Cross-Validation Training Data') +
+  xlab('Models') +
+  ylab('Overall Accuracy')
+```
+
+
+```{r, warning=FALSE}
+model_compare = cbind(Model=ModelType, Accuracy=ValidAcc)
+model_compare = data.frame(model_compare)  
+
+ggplot(aes(x=Model, y=Accuracy), data=model_compare) +
+  geom_bar(stat='identity', fill = 'orange') +
+  ggtitle('Comparative Accuracy of Models on Cross-Validation Test Data') +
+  xlab('Models') +
+  ylab('Overall Accuracy')
+```
+
+# Conclusions
+
+Dalla fase di Model Evaluation si può notare che vi sono alcune differenze di performace tra il Training e i Test Set. Il <code>RandomForest</code> che sul Training Set aveva un accuracy quasi dello 0.98 sul Test Set performa peggio (circa 0.83). Stessa cosa accade per quanto riguarda il <code>KNN</code>(da 0.82 a 0.67), l'<code>SVM</code> (da 0.67 a 0.64) e l'<code>XGB</code>(da 0.64 a 0.57), mentre le performance dell'<code>LDA</code> e della <code>RegressioneLogistica</code> rimangono più o meno stabili quando si passa dal Training al Test Set (da notare che nei confronti della <code>RegressioneLogistica</code> si registra un miglioramento - seppur minimo - in termini di performance sul Test Set rispetto al Training Set).
+Quindi secondo tale logica il miglior modello dovrebbe essere il Random Forest. Se guardiamo, però alla sua matrice di confusione ci si rende conto che tale modello prevede bene la negativa ma non fa altrettanto bene con quella positiva. Gli stessi risultati si trovano in corrispondenza anche del <code>K-NearestNieghbors</code>. L'<code>eXtremeGradientBoosting</code>, invece, offre una intrepretazione opposta riuscendo a prevedere leggermente meglio la classe positiva rispetto al <code>RandomForest</code>, ma svolge un lavoro peggiore nel prevedere la classe negativa sbagliando quasi la metà delle volte. Dei risultati intermedi si ottengono, invece, nei confronti della <code>RegressioneLogistica</code> e della<code> LDA</code>: se la prima prevede meglio la classe negativa mentre prevede peggio la classe positiva, la seconda fa esattamente l'opposto. Infine per quanto riguarda l'<code>SVM</code> i risultati nel prevedere la classe positiva sono gli stessi della <code>LDA</code> ma sono peggiori rispetto ad essa quando si tratta di prevedere la classe negativa. 
+In realtà in questi casi la misura dell'accuracy può non essere la misura più appropriata quando si cerca di confrontare più classificatori come in questo caso. 
+La misura più adatta sarebbe il valore dell'area al di sotto della curva ROC (AUC); in tal senso sarebbe la LDA a mostrare il risultato migliore (0.734) seguita dalla Regressione Logistica (0.733) e il resto a seguire.
+Ragionando in maniera più "pratica", però, il nostro intento è quello di prevedere se un paziente futuro deve essere considerato come paziente a rischio e di conseguenza necessita di essere monitorato, di cambiare stile di vita, di seguire una dieta specifica oppure di cure specifiche; in questo contesto possiamo comprendere come un tasso elevato di falsi negativi - non classificare un soggetto come un soggetto a rischio quando in realtà lo è - è molto più pericoloso di un alto tasso di falsi positivi (si rischia solo di monitorare un paziente che poi non svilupperà una malattia cardiovascolare). Seguendo tale logica sarebbe l'<code>eXtremeGradientBoosting</code> a svolgere nel miglior modo il task di classificazione in questione.
+
+
+
